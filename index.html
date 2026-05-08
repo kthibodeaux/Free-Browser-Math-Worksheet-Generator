@@ -81,6 +81,7 @@
         <option value="+">Addition (+)</option>
         <option value="-">Subtraction (−)</option>
         <option value="×">Multiplication (×)</option>
+        <option value="/">Division (/)</option>
       </select>
     </div>
 
@@ -224,9 +225,22 @@
 
     while(arr.length < total && attempts < maxA) {
       attempts++;
-      let a = r(topMin, topMax), b = r(botMin, botMax);
+      let a, b;
 
-      if(op==='-' && nonNegSub && a < b) [a,b] = [b,a];
+      if(op==='/') {
+        // Pick divisor (bottom) and quotient from ranges, compute dividend (top)
+        b = r(botMin, botMax);
+        if(b === 0) continue;
+        const qMin = Math.max(1, Math.ceil(topMin / b));
+        const qMax = Math.floor(topMax / b);
+        if(qMin > qMax) continue;
+        const q = r(qMin, qMax);
+        a = b * q;
+      } else {
+        a = r(topMin, topMax);
+        b = r(botMin, botMax);
+        if(op==='-' && nonNegSub && a < b) [a,b] = [b,a];
+      }
 
       let key;
       if(op==='+' || op==='×') {
@@ -241,24 +255,33 @@
     }
 
     while(arr.length < total) {
-      let a=r(topMin,topMax), b=r(botMin,botMax);
-      if(op==='-' && nonNegSub && a<b) [a,b]=[b,a];
+      let a, b;
+      if(op==='/') {
+        b = r(botMin, botMax) || 1;
+        const qMin = Math.max(1, Math.ceil(topMin / b));
+        const qMax = Math.floor(topMax / b);
+        const q = qMin <= qMax ? r(qMin, qMax) : 1;
+        a = b * q;
+      } else {
+        a=r(topMin,topMax); b=r(botMin,botMax);
+        if(op==='-' && nonNegSub && a<b) [a,b]=[b,a];
+      }
       arr.push({top:a,bot:b,op,ans:calc(a,b,op)});
     }
     return arr;
   }
 
-  function calc(a,b,op){ return op==='+'?a+b:op==='-'?a-b:a*b; }
+  function calc(a,b,op){ return op==='+'?a+b:op==='-'?a-b:op==='×'?a*b:a/b; }
 
 function renderPage(probs, cfg, withAns) {
   const { paper, cols, rows, fontSize, title } = cfg;
   const W = paper.wPx, H = paper.hPx;
-  const c = document.createElement('canvas'); 
-  c.width = W; 
+  const c = document.createElement('canvas');
+  c.width = W;
   c.height = H;
   const g = c.getContext('2d');
 
-  g.fillStyle = '#fff'; 
+  g.fillStyle = '#fff';
   g.fillRect(0, 0, W, H);
   g.fillStyle = '#000';
 
@@ -295,57 +318,90 @@ function renderPage(probs, cfg, withAns) {
       const x0 = areaX + cIdx * colW;
       const y0 = areaY + rIdx * rowH;
 
-      // Measure text widths for centering
       g.font = `${numFS}px ${mono}`;
       const topStr = String(p.top);
       const botStr = String(p.bot);
       const topW = g.measureText(topStr).width;
       const botW = g.measureText(botStr).width;
-      const maxW = Math.max(topW, botW);
+      const lw = Math.max(2, Math.floor(numFS * 0.08));
+      g.lineWidth = lw;
 
-      // Entire problem is top-centered within the cell
-      const rightX = x0 + (colW / 2) + (maxW / 2);
-      let currY = y0 + numFS * 1.1;
+      if (p.op === '/') {
+        // Long division:  divisor ) dividend  with quotient on top
+        const gap = numFS * 0.3;
+        const dividendStr = topStr;
+        const divisorStr = botStr;
+        const dividendW = topW;
+        const divisorW = botW;
 
-      // Top number (right-aligned)
-      g.font = `${numFS}px ${mono}`;
-      g.textAlign = 'right';
-      g.fillText(topStr, rightX, currY);
+        // Center the whole thing:  divisor )| dividend
+        const totalW = divisorW + gap + dividendW;
+        const startX = x0 + (colW - totalW) / 2;
+        const bracketX = startX + divisorW + gap * 0.5;
+        const dividendLeft = bracketX + gap * 0.5;
+        const dividendRight = dividendLeft + dividendW;
+        const baseY = y0 + numFS * 1.6;
 
-      // Bottom placement
-      const botY = currY + numFS * 1.2;
-      const gap = numFS * 0.25;
+        // Draw divisor
+        g.textAlign = 'left';
+        g.fillText(divisorStr, startX, baseY);
 
-      // Compute line start & end
-      const firstDigitLeft = rightX - topW;
-      const lineStart = firstDigitLeft - gap; 
-      const lineEnd = rightX;
+        // Draw dividend
+        g.fillText(dividendStr, dividendLeft, baseY);
 
-      // Operation symbol left of the line
-      g.font = `${symFS}px ${mono}`;
-      const symW = g.measureText(p.op).width;
-      const symX = lineStart - symW - gap;
-      g.textAlign = 'left';
-      g.fillText(p.op, symX, botY);
+        // Draw the bracket: curved part + horizontal line over dividend
+        const overlineY = baseY - numFS * 0.9;
+        g.beginPath();
+        // Vertical/curved part of bracket
+        g.moveTo(bracketX, baseY + numFS * 0.15);
+        g.quadraticCurveTo(bracketX - gap * 0.3, overlineY, bracketX, overlineY);
+        // Horizontal line over dividend
+        g.lineTo(dividendRight + gap * 0.3, overlineY);
+        g.stroke();
 
-      // Bottom number (right-aligned)
-      g.font = `${numFS}px ${mono}`;
-      g.textAlign = 'right';
-      g.fillText(botStr, rightX, botY);
+        // Answer on top of the overline
+        if (withAns) {
+          g.font = `${ansFS}px ${mono}`;
+          g.textAlign = 'right';
+          g.fillText(String(p.ans), dividendRight, overlineY - numFS * 0.15);
+        }
+      } else {
+        // Standard vertical format for +, -, ×
+        const maxW = Math.max(topW, botW);
+        const rightX = x0 + (colW / 2) + (maxW / 2);
+        let currY = y0 + numFS * 1.1;
 
-      // Horizontal line
-      const lineY = botY + numFS * 0.25;
-      g.lineWidth = Math.max(2, Math.floor(numFS * 0.08));
-      g.beginPath();
-      g.moveTo(lineStart, lineY);
-      g.lineTo(lineEnd, lineY);
-      g.stroke();
-
-      // Answer (right-aligned, below line)
-      if (withAns) {
-        g.font = `${ansFS}px ${mono}`;
         g.textAlign = 'right';
-        g.fillText(String(p.ans), rightX, lineY + ansFS * 1.2);
+        g.fillText(topStr, rightX, currY);
+
+        const botY = currY + numFS * 1.2;
+        const gap = numFS * 0.25;
+
+        const firstDigitLeft = rightX - topW;
+        const lineStart = firstDigitLeft - gap;
+        const lineEnd = rightX;
+
+        g.font = `${symFS}px ${mono}`;
+        const symW = g.measureText(p.op).width;
+        const symX = lineStart - symW - gap;
+        g.textAlign = 'left';
+        g.fillText(p.op, symX, botY);
+
+        g.font = `${numFS}px ${mono}`;
+        g.textAlign = 'right';
+        g.fillText(botStr, rightX, botY);
+
+        const lineY = botY + numFS * 0.25;
+        g.beginPath();
+        g.moveTo(lineStart, lineY);
+        g.lineTo(lineEnd, lineY);
+        g.stroke();
+
+        if (withAns) {
+          g.font = `${ansFS}px ${mono}`;
+          g.textAlign = 'right';
+          g.fillText(String(p.ans), rightX, lineY + ansFS * 1.2);
+        }
       }
     }
   }
